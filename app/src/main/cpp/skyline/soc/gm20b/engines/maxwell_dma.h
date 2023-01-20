@@ -26,13 +26,14 @@ namespace skyline::soc::gm20b::engine {
 
         void HandleMethod(u32 method, u32 argument);
 
+        void DmaCopy();
+
+        void CopyBlockLinearToPitch();
+        void CopyPitchToBlockLinear();
+
         void LaunchDma();
 
         void ReleaseSemaphore();
-
-        void CopyPitchToBlockLinear();
-
-        void CopyBlockLinearToPitch();
 
       public:
         /**
@@ -200,15 +201,15 @@ namespace skyline::soc::gm20b::engine {
                 u8 numDstComponentsMinusOne : 2;
                 u8 _pad6_ : 6;
 
-                u8 ComponentSize() {
+                inline const u8 ComponentSize() const {
                     return componentSizeMinusOne + 1;
                 }
 
-                u8 NumSrcComponents() {
+                inline const u8 NumSrcComponents() const {
                     return numSrcComponentsMinusOne + 1;
                 }
 
-                u8 NumDstComponents() {
+                inline const u8 NumDstComponents() const {
                     return numDstComponentsMinusOne + 1;
                 }
             };
@@ -224,15 +225,15 @@ namespace skyline::soc::gm20b::engine {
                     u8 gobHeight : 4;
                     u16 _pad_;
 
-                    u8 Width() {
+                    inline const u8 Width() const {
                         return static_cast<u8>(1 << widthLog2);
                     }
 
-                    u8 Height() {
+                    inline const u8 Height() const {
                         return static_cast<u8>(1 << heightLog2);
                     }
 
-                    u8 Depth() {
+                    inline const u8 Depth() const {
                         return static_cast<u8>(1 << depthLog2);
                     }
                 } blockSize;

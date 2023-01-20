@@ -89,39 +89,42 @@ namespace skyline::gpu::texture {
     }
 
     /**
-     * @brief Copies pixel data between a linear and blocklinear texture
-     * @tparam BlockLinearToLinear Whether to copy from a blocklinear texture to a linear texture or a linear texture to a blocklinear texture
+     * @brief Copies pixel data between a pitch and blocklinear texture
+     * @tparam BlockLinearToPitch Whether to copy from a blocklinear texture to a pitch texture or a pitch texture to a blocklinear texture
      */
-    template<bool BlockLinearToLinear>
-    void CopyBlockLinearInternal(Dimensions dimensions,
-                                 size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb,
+    template<bool BlockLinearToPitch>
+    void CopyBlockLinearInternal(const Dimensions &dimensions,
+                                 size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
                                  size_t gobBlockHeight, size_t gobBlockDepth,
-                                 u8 *blockLinear, u8 *linear) {
-        size_t robWidthUnalignedBytes{util::DivideCeil<size_t>(dimensions.width, formatBlockWidth) * formatBpb};
-        size_t robWidthBytes{util::AlignUp(robWidthUnalignedBytes, GobWidth)};
-        size_t robWidthBlocks{robWidthUnalignedBytes / GobWidth};
+                                 u8 *blockLinear, u8 *pitch) {
+        const size_t robWidthUnalignedBytes{util::DivideCeil<size_t>(dimensions.width, formatBlockWidth) * formatBpb};
+        const size_t robWidthBytes{util::AlignUp(robWidthUnalignedBytes, GobWidth)};
+        const size_t robWidthBlocks{robWidthUnalignedBytes / GobWidth};
 
         size_t blockHeight{gobBlockHeight};
-        size_t robHeight{GobHeight * blockHeight};
-        size_t surfaceHeightLines{util::DivideCeil<size_t>(dimensions.height, formatBlockHeight)};
-        size_t surfaceHeightRobs{surfaceHeightLines / robHeight}; //!< The height of the surface in ROBs excluding padding ROBs
+        const size_t robHeight{GobHeight * blockHeight};
+        const size_t surfaceHeightLines{util::DivideCeil<size_t>(dimensions.height, formatBlockHeight)};
+        const size_t surfaceHeightRobs{surfaceHeightLines / robHeight}; //!< The height of the surface in ROBs excluding padding ROBs
 
-        size_t blockDepth{std::min<size_t>(dimensions.depth, gobBlockDepth)};
-        size_t blockPaddingZ{SectorWidth * SectorHeight * blockHeight * (gobBlockDepth - blockDepth)};
+        const size_t blockDepth{std::min<size_t>(dimensions.depth, gobBlockDepth)};
+        const size_t blockPaddingZ{GobWidth * GobHeight * blockHeight * (gobBlockDepth - blockDepth)};
 
-        bool hasPaddingBlock{robWidthUnalignedBytes != robWidthBytes};
-        size_t blockPaddingOffset{hasPaddingBlock ? (GobWidth - (robWidthBytes - robWidthUnalignedBytes)) : 0};
+        const bool hasPaddingBlock{robWidthUnalignedBytes != robWidthBytes};
+        const size_t blockPaddingOffset{hasPaddingBlock ? robWidthUnalignedBytes % GobWidth : 0};
 
-        size_t robBytes{robWidthUnalignedBytes * robHeight};
-        size_t gobYOffset{robWidthUnalignedBytes * GobHeight};
-        size_t gobZOffset{robWidthUnalignedBytes * surfaceHeightLines};
+        const size_t pitchWidthBytes{util::DivideCeil<size_t>(pitchAmount, formatBlockWidth)};
+
+        // For pitch offsets
+        const size_t robBytes{pitchWidthBytes * robHeight};
+        const size_t gobYOffset{pitchWidthBytes * GobHeight};
+        const size_t gobZOffset{pitchWidthBytes * surfaceHeightLines};
 
         u8 *sector{blockLinear};
 
-        auto deswizzleRob{[&](u8 *linearRob, auto isLastRob, size_t blockPaddingY = 0, size_t blockExtentY = 0) {
-            auto deswizzleBlock{[&](u8 *linearBlock, auto copySector) __attribute__((always_inline)) {
+        auto deswizzleRob{[&](u8 *pitchRob, auto isLastRob, size_t blockPaddingY = 0, size_t blockExtentY = 0) {
+            auto deswizzleBlock{[&](u8 *pitchBlock, auto copySector) __attribute__((always_inline)) {
                 for (size_t gobZ{}; gobZ < blockDepth; gobZ++) { // Every Block contains `blockDepth` Z-axis GOBs (Slices)
-                    u8 *linearGob{linearBlock};
+                    u8 *pitchGob{pitchBlock};
                     for (size_t gobY{}; gobY < blockHeight; gobY++) { // Every Block contains `blockHeight` Y-axis GOBs
                         #pragma clang loop unroll_count(SectorLinesInGob)
                         for (size_t index{}; index < SectorLinesInGob; index++) {
@@ -129,47 +132,53 @@ namespace skyline::gpu::texture {
                             size_t yT{((index >> 1) & 0b110) | (index & 0b1)}; // Morton-Swizzle on the Y-axis
 
                             if constexpr (!isLastRob) {
-                                copySector(linearGob + (yT * robWidthUnalignedBytes) + xT, xT);
+                                copySector(pitchGob + (yT * pitchWidthBytes) + xT, xT);
                             } else {
                                 if (gobY != blockHeight - 1 || yT < blockExtentY)
-                                    copySector(linearGob + (yT * robWidthUnalignedBytes) + xT, xT);
+                                    copySector(pitchGob + (yT * pitchWidthBytes) + xT, xT);
                                 else
                                     sector += SectorWidth;
                             }
                         }
 
-                        linearGob += gobYOffset; // Increment the linear GOB to the next Y-axis GOB
+                        pitchGob += gobYOffset; // Increment the linear GOB to the next Y-axis GOB
                     }
 
-                    linearBlock += gobZOffset; // Increment the linear block to the next Z-axis GOB
+                    if constexpr (isLastRob)
+                        sector += blockPaddingY; // Skip over any padding at the end of this slice
+
+                    pitchBlock += gobZOffset; // Increment the linear block to the next Z-axis GOB
                 }
 
                 sector += blockPaddingZ; // Skip over any padding Z-axis GOBs
             }};
 
             for (size_t block{}; block < robWidthBlocks; block++) { // Every ROB contains `surfaceWidthBlocks` blocks (excl. padding block)
-                deswizzleBlock(linearRob, [&](u8 *linearSector, size_t) __attribute__((always_inline)) {
-                    if constexpr (BlockLinearToLinear)
-                        std::memcpy(linearSector, sector, SectorWidth);
-                    else
-                        std::memcpy(sector, linearSector, SectorWidth);
+                deswizzleBlock(pitchRob, [&](u8 *linearSector, size_t) __attribute__((always_inline)) {
+                    if constexpr (BlockLinearToPitch) {
+                        u128 &dst = *(u128 *)(linearSector);
+                        dst = *(u128 *)(sector);
+                    } else {
+                        u128 &dst = *(u128 *)(sector);
+                        dst = *(u128 *)(linearSector);
+                    }
+
                     sector += SectorWidth; // `sectorWidth` bytes are of sequential image data
                 });
 
-                if constexpr (isLastRob)
-                    sector += blockPaddingY; // Skip over any padding at the end of this block
-                linearRob += GobWidth; // Increment the linear block to the next block (As Block Width = 1 GOB Width)
+                pitchRob += GobWidth; // Increment the linear block to the next block (As Block Width = 1 GOB Width)
             }
 
             if (hasPaddingBlock)
-                deswizzleBlock(linearRob, [&](u8 *linearSector, size_t xT) __attribute__((always_inline)) {
+                deswizzleBlock(pitchRob, [&](u8 *linearSector, size_t xT) __attribute__((always_inline)) {
                     #pragma clang loop unroll_count(4)
                     for (size_t pixelOffset{}; pixelOffset < SectorWidth; pixelOffset += formatBpb) {
-                        if (xT < blockPaddingOffset)
-                            if constexpr (BlockLinearToLinear)
+                        if (xT < blockPaddingOffset) {
+                            if constexpr (BlockLinearToPitch)
                                 std::memcpy(linearSector + pixelOffset, sector, formatBpb);
                             else
                                 std::memcpy(sector, linearSector + pixelOffset, formatBpb);
+                        }
 
                         sector += formatBpb;
                         xT += formatBpb;
@@ -177,21 +186,252 @@ namespace skyline::gpu::texture {
                 });
         }};
 
-        u8 *linearRob{linear};
+        u8 *pitchRob{pitch};
         for (size_t rob{}; rob < surfaceHeightRobs; rob++) { // Every Surface contains `surfaceHeightRobs` ROBs (excl. padding ROB)
-            deswizzleRob(linearRob, std::false_type{});
-            linearRob += robBytes; // Increment the linear ROB to the next ROB
+            deswizzleRob(pitchRob, std::false_type{});
+            pitchRob += robBytes; // Increment the linear ROB to the next ROB
         }
 
         if (surfaceHeightLines % robHeight != 0) {
             blockHeight = (util::AlignUp(surfaceHeightLines, GobHeight) - (surfaceHeightRobs * robHeight)) / GobHeight; // Calculate the amount of Y GOBs which aren't padding
 
-            size_t alignedSurfaceLines{util::DivideCeil<size_t>(dimensions.height, formatBlockHeight)};
             deswizzleRob(
-                linearRob,
+                pitchRob,
                 std::true_type{},
-                (gobBlockHeight - blockHeight) * (SectorWidth * SectorWidth * SectorHeight), // Calculate padding at the end of a block to skip
-                util::IsAligned(alignedSurfaceLines, GobHeight) ? GobHeight : alignedSurfaceLines - util::AlignDown(alignedSurfaceLines, GobHeight) // Calculate the line relative to the start of the last GOB that is the cut-off point for the image
+                (gobBlockHeight - blockHeight) * (GobWidth * GobHeight), // Calculate padding at the end of a block to skip
+                util::IsAligned(surfaceHeightLines, GobHeight) ? GobHeight : surfaceHeightLines - util::AlignDown(surfaceHeightLines, GobHeight) // Calculate the line relative to the start of the last GOB that is the cut-off point for the image
+            );
+        }
+    }
+
+    /**
+     * @brief Copies pixel data between a pitch and part of a blocklinear texture
+     * @tparam BlockLinearToPitch Whether to copy from a part of a blocklinear texture to a pitch texture or a pitch texture to a part of a blocklinear texture
+     * @note The function assumes that the pitch texture is always equal or smaller than the blocklinear texture
+     */
+    template<bool BlockLinearToPitch>
+    void CopyBlockLinearSubrectInternal(const Dimensions &pitchDimensions, const Dimensions &blockLinearDimensions,
+                                 size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
+                                 size_t gobBlockHeight, size_t gobBlockDepth,
+                                 u8 *blockLinear, u8 *pitch,
+                                 u16 originX, u16 originY) {
+        const u32 blockSize{(u32)(GobWidth * GobHeight * gobBlockHeight * gobBlockDepth)};
+
+        // Width parameters
+        const u32 robWidthUnalignedBytes{(u32)(util::DivideCeil<u32>(blockLinearDimensions.width, (u32)formatBlockWidth) * formatBpb)};
+        const u32 robWidthAlignedBytes{util::AlignUp(robWidthUnalignedBytes, GobWidth)};
+        const u32 robWidthBlocks{(u32)(robWidthUnalignedBytes / GobWidth)};
+
+        const u16 actualOriginX{util::DivideCeil<u16>(originX, (u16)formatBlockWidth)};
+
+        const u32 actualSubSurfaceWidth{util::DivideCeil<u32>(pitchDimensions.width, (u32)formatBlockWidth)};
+        const u32 subRobWidthUnalignedBytes{actualSubSurfaceWidth * (u32)formatBpb};
+        const u32 originXBytes{actualOriginX * (u32)formatBpb};
+        const u32 subRobEndBytes{originXBytes + subRobWidthUnalignedBytes};
+        const u32 subRobWidthBlocks{(util::AlignDown(subRobEndBytes, GobWidth) - originXBytes) / (u32)GobWidth};
+
+        // Height parameters
+        u16 blockHeight{(u16)(gobBlockHeight)};
+
+        const u32 robHeight{blockHeight * (u32)GobHeight};
+        const u32 surfaceHeightLines{util::DivideCeil<u32>(blockLinearDimensions.height, (u32)formatBlockHeight)};
+        const u32 subSurfaceHeightLines{util::DivideCeil<u32>(pitchDimensions.height, (u32)formatBlockHeight)};
+
+        const u16 actualOriginY{util::DivideCeil<u16>(originY, (u16)formatBlockWidth)};
+
+        const u32 subSurfaceHeightRobs{actualOriginY ? util::AlignDown(subSurfaceHeightLines - (robHeight - (actualOriginY % robHeight)), robHeight) / robHeight : subSurfaceHeightLines / robHeight};
+
+        // SubROB block (X axis) alignment parameters
+        const bool startsSubRobXMisaligned{!util::IsAligned(actualOriginX, GobWidth)};
+        const bool endsSubRobXMisaligned{!util::IsAligned(actualOriginX + actualSubSurfaceWidth, GobWidth)};
+
+        const u32 subRobStartPadding{startsSubRobXMisaligned ? originXBytes % (u32)GobWidth : 0};
+        const u32 subRobEndOffset{endsSubRobXMisaligned ? subRobEndBytes % (u32)GobWidth : 0};
+
+        const u32 subRobStartBlockPadding{(originXBytes / (u32)GobWidth) * blockSize};
+        const u32 subRobEndBlockOffset{util::AlignDown(robWidthAlignedBytes - subRobEndBytes, GobWidth) * (u32)GobHeight * (u32)gobBlockHeight * (u32)gobBlockDepth};
+
+        // SubROB rob (Y axis) alignment parameters
+        const bool startsSubRectYMisaligned{!util::IsAligned(actualOriginY, robHeight)};
+        const bool endsSubRectYMisaligned{!util::IsAligned(actualOriginY + subSurfaceHeightLines, robHeight)};
+
+        const u16 startingRob{(u16)(actualOriginY / robHeight)};
+
+        const u16 startingRobLinePadding{(u16)(startsSubRectYMisaligned ? actualOriginY % robHeight : 0)};
+        const u16 endingRobLineOffset{(u16)(endsSubRectYMisaligned ? (actualOriginY + subSurfaceHeightLines) % robHeight : 0)};
+
+        // Depth parameters
+        const u16 blockDepth{std::min<u16>((u16)blockLinearDimensions.depth, (u16)gobBlockDepth)};
+        const u32 blockPaddingZ{(u32)(GobWidth * GobHeight * blockHeight * (gobBlockDepth - blockDepth))};
+
+        // Pitch surface offsets
+        const u32 pitchWidthBytes{util::DivideCeil<u32>(pitchAmount, (u32)formatBlockWidth)};
+
+        const u32 robBytes{pitchWidthBytes * robHeight};
+        const u32 gobYOffset{pitchWidthBytes * (u32)GobHeight};
+        const u32 gobZOffset{pitchWidthBytes * subSurfaceHeightLines};
+
+        // Offset the blocklinear texture by skipping ROBs that are not needed
+        u8 *sector{blockLinear + (startingRob * robWidthAlignedBytes * robHeight * gobBlockDepth)};
+
+        u16 gobStartY{0};    // Used for starting Y gob index.
+
+        auto deswizzleSubRob{[&](u8 *pitchRob, auto isFirstOrLastRob, size_t blockStartPaddingY = 0, u16 blockStartY = 0, size_t blockEndPaddingY = 0, size_t blockExtentY = GobHeight) {
+            auto deswizzleBlock{[&](u8 *pitchBlock, auto copySector) __attribute__((always_inline)) {
+                for (u16 gobZ{}; gobZ < blockDepth; ++gobZ) { // Every Block contains `blockDepth` Z-axis GOBs (Slices)
+                    u8 *pitchGob{pitchBlock};
+
+                    if constexpr (isFirstOrLastRob)
+                        sector += blockStartPaddingY; // Skip over padding Y GOBs at the start
+
+                    for (u16 gobY{gobStartY}; gobY < blockHeight; ++gobY) { // Every Block contains `blockHeight` Y-axis GOBs
+                        #pragma clang loop unroll_count(SectorLinesInGob)
+                        for (size_t index{}; index < SectorLinesInGob; ++index) {
+                            size_t xT{((index << 3) & 0b10000) | ((index << 1) & 0b100000)}; // Morton-Swizzle on the X-axis
+                            size_t yT{((index >> 1) & 0b110) | (index & 0b1)}; // Morton-Swizzle on the Y-axis
+
+                            if constexpr (!isFirstOrLastRob) {
+                                if constexpr (BlockLinearToPitch) {
+                                    u128 &dst = *(u128 *)(pitchGob + (yT * pitchWidthBytes) + xT);
+                                    dst = *(u128 *)(sector);
+                                } else {
+                                    u128 &dst = *(u128 *)(sector);
+                                    dst = *(u128 *)(pitchGob + (yT * pitchWidthBytes) + xT);
+                                }
+
+                                sector += SectorWidth; // `SectorWidth` bytes are of sequential image data
+                            } else {
+                                if (gobStartY == (blockHeight - 1)) [[unlikely]] {
+                                    if (!(blockStartY <= yT && yT < blockExtentY)) {
+                                        sector += SectorWidth;
+                                        continue;
+                                    }
+                                } else if (!((gobY != blockHeight - 1 && (gobY != gobStartY)) ||
+                                ((blockStartY <= yT) && (gobY == gobStartY)) ||
+                                ((yT < blockExtentY) && (gobY == blockHeight - 1)))) {
+                                    sector += SectorWidth;
+                                    continue;
+                                }
+
+                                u8 * const linearSector{pitchGob + (yT * pitchWidthBytes) + xT};
+                                #pragma clang loop unroll_count(4)
+                                for (u16 pixelOffset{}; pixelOffset < SectorWidth; pixelOffset += formatBpb) {
+                                    if (copySector(xT)) {
+                                        if constexpr (BlockLinearToPitch)
+                                            std::memcpy(linearSector + pixelOffset, sector, formatBpb);
+                                        else
+                                            std::memcpy(sector, linearSector + pixelOffset, formatBpb);
+                                    }
+
+                                    sector += formatBpb;
+                                    xT += formatBpb;
+                                }
+                            }
+                        }
+
+                        pitchGob += gobYOffset; // Increment the linear GOB to the next Y-axis GOB
+                    }
+
+                    if constexpr (isFirstOrLastRob)
+                        sector += blockEndPaddingY; // Skip over padding Y GOBs at the end
+
+                    pitchBlock += gobZOffset; // Increment the linear block to the next Z-axis GOB
+                }
+
+                sector += blockPaddingZ; // Skip over any padding Z-axis GOBs
+            }};
+
+            // Skip over blocks until we reach the start of the SubROB
+            sector += subRobStartBlockPadding;
+
+            if (startsSubRobXMisaligned) [[unlikely]] {
+                if (endsSubRobXMisaligned && ((subRobStartPadding + actualSubSurfaceWidth) < 63)) [[unlikely]] { // If we only have one block that starts and ends misaligned
+                    deswizzleBlock(pitchRob, [&](size_t xT) __attribute__((always_inline)) {
+                        if ((subRobStartPadding <= xT) && (xT < subRobEndOffset))
+                            return true;
+                        return false;
+                    });
+                    pitchRob += GobWidth; // Increment the pitch block to the next block (As Block Width = 1 GOB Width)
+                    return;
+                }
+
+                deswizzleBlock(pitchRob, [&](size_t xT) __attribute__((always_inline)) {
+                    if (subRobStartPadding <= xT)
+                        return true;
+                    return false;
+                });
+
+                pitchRob += GobWidth; // Increment the pitch block to the next block (As Block Width = 1 GOB Width)
+            }
+
+            for (u32 block{}; block < subRobWidthBlocks; ++block) {
+                deswizzleBlock(pitchRob, [&](size_t) __attribute__((always_inline)) { return true; });
+
+                pitchRob += GobWidth; // Increment the pitch block to the next block (As Block Width = 1 GOB Width)
+            }
+
+            if (endsSubRobXMisaligned) [[likely]] {
+                deswizzleBlock(pitchRob, [&](size_t xT) __attribute__((always_inline)) {
+                    if (xT < subRobEndOffset)
+                        return true;
+                    return false;
+                });
+
+                pitchRob += GobWidth; // Increment the pitch block to the next block (As Block Width = 1 GOB Width)
+            }
+
+            // Skip to the end of the ROB
+             sector += subRobEndBlockOffset;
+        }};
+
+        u8 *pitchRob{pitch};
+
+        if (startsSubRectYMisaligned) [[unlikely]] {
+            const u32 blockStartYPadding{(u32)(util::AlignDown(startingRobLinePadding, GobHeight) * GobWidth)};
+
+            gobStartY = startingRobLinePadding / GobHeight;
+
+            if (endsSubRectYMisaligned && ((startingRobLinePadding + subSurfaceHeightLines) < (robHeight - 1))) [[unlikely]] { // If we only have 1 subRob that starts and ends misaligned
+                const u16 endingGobLineOffset{(u16)(endingRobLineOffset % GobHeight)};
+                blockHeight = util::DivideCeil<u16>(endingRobLineOffset, GobHeight);
+
+                deswizzleSubRob(pitchRob,
+                                std::true_type{},
+                                blockStartYPadding,
+                                startingRobLinePadding % GobHeight,
+                                (gobBlockHeight - blockHeight) * GobWidth * GobHeight,
+                                endingGobLineOffset ? endingGobLineOffset : GobHeight
+                );
+
+                return;
+            } else {
+                deswizzleSubRob(pitchRob,
+                                std::true_type{},
+                                blockStartYPadding,
+                                startingRobLinePadding % GobHeight
+                );
+
+                gobStartY = 0;
+                // Only offset the pitch surface by the amount of lines we actually copied
+                pitchRob += pitchWidthBytes * (robHeight - startingRobLinePadding);
+            }
+        }
+
+        for (u16 rob{}; rob < subSurfaceHeightRobs; ++rob) {
+            deswizzleSubRob(pitchRob, std::false_type{});
+            pitchRob += robBytes; // Increment the pitch ROB to the next subROB
+        }
+
+        if (endsSubRectYMisaligned) {
+            const u16 endingGobLineOffset{(u16)(endingRobLineOffset % GobHeight)};
+            blockHeight = util::DivideCeil<u16>(endingRobLineOffset, GobHeight);
+
+            deswizzleSubRob(pitchRob,
+                            std::true_type{},
+                            0,
+                            0,
+                            (gobBlockHeight - blockHeight) * GobWidth * GobHeight,
+                            endingGobLineOffset ? endingGobLineOffset : GobHeight
             );
         }
     }
@@ -199,34 +439,78 @@ namespace skyline::gpu::texture {
     void CopyBlockLinearToLinear(Dimensions dimensions, size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, size_t gobBlockHeight, size_t gobBlockDepth, u8 *blockLinear, u8 *linear) {
         CopyBlockLinearInternal<true>(
             dimensions,
-            formatBlockWidth, formatBlockHeight, formatBpb,
+            formatBlockWidth, formatBlockHeight, formatBpb, (u32)(dimensions.width * formatBpb),
             gobBlockHeight, gobBlockDepth,
             blockLinear, linear
         );
+    }
+
+    void CopyBlockLinearToPitch(Dimensions dimensions,
+                                size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
+                                size_t gobBlockHeight, size_t gobBlockDepth,
+                                u8 *blockLinear, u8 *pitch) {
+        CopyBlockLinearInternal<true>(
+                dimensions,
+                formatBlockWidth, formatBlockHeight, formatBpb, pitchAmount,
+                gobBlockHeight, gobBlockDepth,
+                blockLinear, pitch
+        );
+    }
+
+    void CopyBlockLinearToPitchSubrect(Dimensions pitchDimensions, Dimensions blockLinearDimensions,
+                                       size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
+                                       size_t gobBlockHeight, size_t gobBlockDepth,
+                                       u8 *blockLinear, u8 *pitch,
+                                       u16 originX, u16 originY) {
+        CopyBlockLinearSubrectInternal<true>(pitchDimensions, blockLinearDimensions,
+                                             formatBlockWidth, formatBlockHeight, formatBpb, pitchAmount,
+                                             gobBlockHeight, gobBlockDepth,
+                                             blockLinear, pitch,
+                                             originX, originY);
     }
 
     void CopyBlockLinearToLinear(const GuestTexture &guest, u8 *blockLinear, u8 *linear) {
         CopyBlockLinearInternal<true>(
             guest.dimensions,
-            guest.format->blockWidth, guest.format->blockHeight, guest.format->bpb,
+            guest.format->blockWidth, guest.format->blockHeight, guest.format->bpb, guest.dimensions.width * guest.format->bpb,
             guest.tileConfig.blockHeight, guest.tileConfig.blockDepth,
             blockLinear, linear
         );
     }
 
-    void CopyLinearToBlockLinear(Dimensions dimensions, size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, size_t gobBlockHeight, size_t gobBlockDepth, u8 *linear, u8 *blockLinear) {
+    void CopyLinearToBlockLinear(Dimensions dimensions,
+                                 size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb,
+                                 size_t gobBlockHeight, size_t gobBlockDepth,
+                                 u8 *linear, u8 *blockLinear) {
+        CopyBlockLinearInternal<false>(dimensions,formatBlockWidth, formatBlockHeight, formatBpb, (u32)(dimensions.width * formatBpb), gobBlockHeight, gobBlockDepth, blockLinear, linear);
+    }
+
+    void CopyPitchToBlockLinear(Dimensions dimensions, size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount, size_t gobBlockHeight, size_t gobBlockDepth, u8 *pitch, u8 *blockLinear) {
         CopyBlockLinearInternal<false>(
             dimensions,
-            formatBlockWidth, formatBlockHeight, formatBpb,
+            formatBlockWidth, formatBlockHeight, formatBpb, pitchAmount,
             gobBlockHeight, gobBlockDepth,
-            blockLinear, linear
+            blockLinear, pitch
         );
+    }
+
+    void CopyPitchToBlockLinearSubrect(Dimensions pitchDimensions, Dimensions blockLinearDimensions,
+                                       size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
+                                       size_t gobBlockHeight, size_t gobBlockDepth,
+                                       u8 *pitch, u8 *blockLinear,
+                                       u16 originX, u16 originY) {
+        CopyBlockLinearSubrectInternal<false>(pitchDimensions, blockLinearDimensions,
+                                              formatBlockWidth, formatBlockHeight,
+                                              formatBpb, pitchAmount,
+                                              gobBlockHeight, gobBlockDepth,
+                                              blockLinear, pitch,
+                                              originX, originY);
     }
 
     void CopyLinearToBlockLinear(const GuestTexture &guest, u8 *linear, u8 *blockLinear) {
         CopyBlockLinearInternal<false>(
             guest.dimensions,
-            guest.format->blockWidth, guest.format->blockHeight, guest.format->bpb,
+            guest.format->blockWidth, guest.format->blockHeight, guest.format->bpb, guest.dimensions.width * guest.format->bpb,
             guest.tileConfig.blockHeight, guest.tileConfig.blockDepth,
             blockLinear, linear
         );
