@@ -206,10 +206,10 @@ namespace skyline::gpu::texture {
      */
     template<bool BlockLinearToPitch>
     void CopyBlockLinearSubrectInternal(Dimensions pitchDimensions, Dimensions blockLinearDimensions,
-                                 size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
-                                 size_t gobBlockHeight, size_t gobBlockDepth,
-                                 u8 *blockLinear, u8 *pitch,
-                                 u16 originX, u16 originY) {
+                                        size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
+                                        size_t gobBlockHeight, size_t gobBlockDepth,
+                                        u8 *blockLinear, u8 *pitch,
+                                        u16 originX, u16 originY) {
         u32 blockSize{(u32)(GobWidth * GobHeight * gobBlockHeight * gobBlockDepth)};
 
         // Width parameters
@@ -297,8 +297,8 @@ namespace skyline::gpu::texture {
                                         continue;
                                     }
                                 } else if (!((gobY != blockHeight - 1 && (gobY != gobStartY)) ||
-                                ((blockStartY <= yT) && (gobY == gobStartY)) ||
-                                ((yT < blockExtentY) && (gobY == blockHeight - 1)))) {
+                                    ((blockStartY <= yT) && (gobY == gobStartY)) ||
+                                    ((yT < blockExtentY) && (gobY == blockHeight - 1)))) {
                                     sector += SectorWidth;
                                     continue;
                                 }
@@ -371,7 +371,7 @@ namespace skyline::gpu::texture {
             }
 
             // Skip to the end of the ROB
-             sector += subRobEndBlockOffset;
+            sector += subRobEndBlockOffset;
         }};
 
         u8 *pitchRob{pitch};
@@ -440,10 +440,10 @@ namespace skyline::gpu::texture {
                                 size_t gobBlockHeight, size_t gobBlockDepth,
                                 u8 *blockLinear, u8 *pitch) {
         CopyBlockLinearInternal<true>(
-                dimensions,
-                formatBlockWidth, formatBlockHeight, formatBpb, pitchAmount,
-                gobBlockHeight, gobBlockDepth,
-                blockLinear, pitch
+            dimensions,
+            formatBlockWidth, formatBlockHeight, formatBpb, pitchAmount,
+            gobBlockHeight, gobBlockDepth,
+            blockLinear, pitch
         );
     }
 
@@ -456,7 +456,8 @@ namespace skyline::gpu::texture {
                                              formatBlockWidth, formatBlockHeight, formatBpb, pitchAmount,
                                              gobBlockHeight, gobBlockDepth,
                                              blockLinear, pitch,
-                                             originX, originY);
+                                             originX, originY
+        );
     }
 
     void CopyBlockLinearToLinear(const GuestTexture &guest, u8 *blockLinear, u8 *linear) {
@@ -472,7 +473,11 @@ namespace skyline::gpu::texture {
                                  size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb,
                                  size_t gobBlockHeight, size_t gobBlockDepth,
                                  u8 *linear, u8 *blockLinear) {
-        CopyBlockLinearInternal<false>(dimensions,formatBlockWidth, formatBlockHeight, formatBpb, 0, gobBlockHeight, gobBlockDepth, blockLinear, linear);
+        CopyBlockLinearInternal<false>(dimensions,
+                                       formatBlockWidth, formatBlockHeight, formatBpb, 0,
+                                       gobBlockHeight, gobBlockDepth,
+                                       blockLinear, linear
+        );
     }
 
     void CopyPitchToBlockLinear(Dimensions dimensions, size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount, size_t gobBlockHeight, size_t gobBlockDepth, u8 *pitch, u8 *blockLinear) {
@@ -494,7 +499,8 @@ namespace skyline::gpu::texture {
                                               formatBpb, pitchAmount,
                                               gobBlockHeight, gobBlockDepth,
                                               blockLinear, pitch,
-                                              originX, originY);
+                                              originX, originY
+        );
     }
 
     void CopyLinearToBlockLinear(const GuestTexture &guest, u8 *linear, u8 *blockLinear) {
