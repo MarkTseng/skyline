@@ -39,7 +39,6 @@ namespace skyline::soc::gm20b::engine {
     }
 
     void MaxwellDma::DmaCopy() {
-
         if (registers.launchDma->multiLineEnable) {
             channelCtx.executor.Submit();
 
@@ -47,14 +46,13 @@ namespace skyline::soc::gm20b::engine {
                 // Pitch to Pitch copy
                 if (registers.launchDma->srcMemoryLayout == Registers::LaunchDma::MemoryLayout::Pitch) {
                     if ((*registers.pitchIn == *registers.pitchOut) && (*registers.pitchIn == *registers.lineLengthIn)) {
-                        // Both Linear...copy as is.
+                        // Both Linear, copy as is.
                         interconnect.Copy(u64{*registers.offsetOut}, u64{*registers.offsetIn}, u64{*registers.lineLengthIn * *registers.lineCount});
                     } else {
-                        u32 srcCopyOffset = 0;
-                        u32 dstCopyOffset = 0;
-                        for (u32 linesToCopy = *registers.lineCount; linesToCopy; --linesToCopy, srcCopyOffset += *registers.pitchIn, dstCopyOffset += *registers.pitchOut) {
+                        u32 srcCopyOffset{0};
+                        u32 dstCopyOffset{0};
+                        for (u32 linesToCopy = *registers.lineCount; linesToCopy; --linesToCopy, srcCopyOffset += *registers.pitchIn, dstCopyOffset += *registers.pitchOut)
                             interconnect.Copy(u64{*registers.offsetOut + dstCopyOffset} , u64{*registers.offsetIn + srcCopyOffset}, u64{*registers.lineLengthIn});
-                        }
                     }
                 } else {
                     Logger::Warn("BlockLinear to BlockLinear DMA copies are unimplemented!");
@@ -72,22 +70,21 @@ namespace skyline::soc::gm20b::engine {
         }
     }
 
-    void MaxwellDma::CopyBlockLinearToPitch()
-    {
+    void MaxwellDma::CopyBlockLinearToPitch() {
         if (registers.srcSurface->blockSize.Width() != 1) [[unlikely]] {
-            Logger::Warn("DMA copies with a block width of a quarter GOBs are unimplemented!");
+            Logger::Error("Blocklinear surfaces with a non-one block width are unsupported on the Tegra X1: {}", registers.srcSurface->blockSize.Width());
             return;
         }
 
-        const gpu::texture::Dimensions srcDimensions{registers.srcSurface->width, registers.srcSurface->height, registers.srcSurface->depth};
-        const size_t srcLayerStride{gpu::texture::GetBlockLinearLayerSize(srcDimensions, 1, 1, 1, registers.srcSurface->blockSize.Height(), registers.srcSurface->blockSize.Depth())};
-        const size_t srcLayerAddress{*registers.offsetIn + (registers.srcSurface->layer * srcLayerStride)};
+        gpu::texture::Dimensions srcDimensions{registers.srcSurface->width, registers.srcSurface->height, registers.srcSurface->depth};
+        size_t srcLayerStride{gpu::texture::GetBlockLinearLayerSize(srcDimensions, 1, 1, 1, registers.srcSurface->blockSize.Height(), registers.srcSurface->blockSize.Depth())};
+        size_t srcLayerAddress{*registers.offsetIn + (registers.srcSurface->layer * srcLayerStride)};
 
         // Get source address
         auto srcMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetIn, srcLayerStride)};
 
-        const gpu::texture::Dimensions dstDimensions{*registers.lineLengthIn, *registers.lineCount, registers.srcSurface->depth};
-        const u32 dstStride{*registers.pitchIn * dstDimensions.height * dstDimensions.depth};
+        gpu::texture::Dimensions dstDimensions{*registers.lineLengthIn, *registers.lineCount, registers.srcSurface->depth};
+        u32 dstStride{*registers.pitchIn * dstDimensions.height * dstDimensions.depth};
 
         // Get destination address
         auto dstMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetOut, dstStride)};
@@ -117,22 +114,21 @@ namespace skyline::soc::gm20b::engine {
         }
     }
 
-    void MaxwellDma::CopyPitchToBlockLinear()
-    {
+    void MaxwellDma::CopyPitchToBlockLinear() {
         if (registers.dstSurface->blockSize.Width() != 1) [[unlikely]] {
-            Logger::Warn("DMA copies with a block width of a quarter GOBs are unimplemented!");
+            Logger::Error("Blocklinear surfaces with a non-one block width are unsupported on the Tegra X1: {}", registers.srcSurface->blockSize.Width());
             return;
         }
 
-        const gpu::texture::Dimensions srcDimensions{*registers.lineLengthIn, *registers.lineCount, registers.dstSurface->depth};
-        const u32 srcSize{*registers.pitchIn * srcDimensions.height * srcDimensions.depth};
+        gpu::texture::Dimensions srcDimensions{*registers.lineLengthIn, *registers.lineCount, registers.dstSurface->depth};
+        u32 srcSize{*registers.pitchIn * srcDimensions.height * srcDimensions.depth};
 
         // Get source address
         auto srcMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetIn, srcSize)};
 
-        const gpu::texture::Dimensions dstDimensions{registers.dstSurface->width, registers.dstSurface->height, registers.dstSurface->depth};
-        const size_t dstLayerStride{gpu::texture::GetBlockLinearLayerSize(dstDimensions, 1, 1, 1, registers.dstSurface->blockSize.Height(), registers.dstSurface->blockSize.Depth())};
-        const size_t dstLayerAddress{*registers.offsetOut + (registers.dstSurface->layer * dstLayerStride)};
+        gpu::texture::Dimensions dstDimensions{registers.dstSurface->width, registers.dstSurface->height, registers.dstSurface->depth};
+        size_t dstLayerStride{gpu::texture::GetBlockLinearLayerSize(dstDimensions, 1, 1, 1, registers.dstSurface->blockSize.Height(), registers.dstSurface->blockSize.Depth())};
+        size_t dstLayerAddress{*registers.offsetOut + (registers.dstSurface->layer * dstLayerStride)};
 
         // Get destination address
         auto dstMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetOut, dstLayerStride)};

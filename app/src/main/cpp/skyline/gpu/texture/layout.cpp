@@ -89,35 +89,33 @@ namespace skyline::gpu::texture {
     }
 
     /**
-     * @brief Copies pixel data between a pitch and blocklinear texture
-     * @tparam BlockLinearToPitch Whether to copy from a blocklinear texture to a pitch texture or a pitch texture to a blocklinear texture
+     * @brief Copies pixel data between a pitch-linear and blocklinear texture
+     * @tparam BlockLinearToPitch Whether to copy from a blocklinear texture to a pitch-linear texture or a pitch-linear texture to a blocklinear texture
      */
     template<bool BlockLinearToPitch>
-    void CopyBlockLinearInternal(const Dimensions &dimensions,
+    void CopyBlockLinearInternal(Dimensions dimensions,
                                  size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
                                  size_t gobBlockHeight, size_t gobBlockDepth,
                                  u8 *blockLinear, u8 *pitch) {
-        const size_t robWidthUnalignedBytes{util::DivideCeil<size_t>(dimensions.width, formatBlockWidth) * formatBpb};
-        const size_t robWidthBytes{util::AlignUp(robWidthUnalignedBytes, GobWidth)};
-        const size_t robWidthBlocks{robWidthUnalignedBytes / GobWidth};
+        size_t robWidthUnalignedBytes{util::DivideCeil<size_t>(dimensions.width, formatBlockWidth) * formatBpb};
+        size_t robWidthBytes{util::AlignUp(robWidthUnalignedBytes, GobWidth)};
+        size_t robWidthBlocks{robWidthUnalignedBytes / GobWidth};
 
         size_t blockHeight{gobBlockHeight};
-        const size_t robHeight{GobHeight * blockHeight};
-        const size_t surfaceHeightLines{util::DivideCeil<size_t>(dimensions.height, formatBlockHeight)};
-        const size_t surfaceHeightRobs{surfaceHeightLines / robHeight}; //!< The height of the surface in ROBs excluding padding ROBs
+        size_t robHeight{GobHeight * blockHeight};
+        size_t surfaceHeightLines{util::DivideCeil<size_t>(dimensions.height, formatBlockHeight)};
+        size_t surfaceHeightRobs{surfaceHeightLines / robHeight}; //!< The height of the surface in ROBs excluding padding ROBs
 
-        const size_t blockDepth{std::min<size_t>(dimensions.depth, gobBlockDepth)};
-        const size_t blockPaddingZ{GobWidth * GobHeight * blockHeight * (gobBlockDepth - blockDepth)};
+        size_t blockDepth{std::min<size_t>(dimensions.depth, gobBlockDepth)};
+        size_t blockPaddingZ{GobWidth * GobHeight * blockHeight * (gobBlockDepth - blockDepth)};
 
-        const bool hasPaddingBlock{robWidthUnalignedBytes != robWidthBytes};
-        const size_t blockPaddingOffset{hasPaddingBlock ? robWidthUnalignedBytes % GobWidth : 0};
+        bool hasPaddingBlock{robWidthUnalignedBytes != robWidthBytes};
+        size_t blockPaddingOffset{hasPaddingBlock ? robWidthUnalignedBytes % GobWidth : 0};
 
-        const size_t pitchWidthBytes{util::DivideCeil<size_t>(pitchAmount, formatBlockWidth)};
-
-        // For pitch offsets
-        const size_t robBytes{pitchWidthBytes * robHeight};
-        const size_t gobYOffset{pitchWidthBytes * GobHeight};
-        const size_t gobZOffset{pitchWidthBytes * surfaceHeightLines};
+        size_t pitchWidthBytes{pitchAmount ? pitchAmount : robWidthUnalignedBytes};
+        size_t robBytes{pitchWidthBytes * robHeight};
+        size_t gobYOffset{pitchWidthBytes * GobHeight};
+        size_t gobZOffset{pitchWidthBytes * surfaceHeightLines};
 
         u8 *sector{blockLinear};
 
@@ -155,13 +153,10 @@ namespace skyline::gpu::texture {
 
             for (size_t block{}; block < robWidthBlocks; block++) { // Every ROB contains `surfaceWidthBlocks` blocks (excl. padding block)
                 deswizzleBlock(pitchRob, [&](u8 *linearSector, size_t) __attribute__((always_inline)) {
-                    if constexpr (BlockLinearToPitch) {
-                        u128 &dst = *(u128 *)(linearSector);
-                        dst = *(u128 *)(sector);
-                    } else {
-                        u128 &dst = *(u128 *)(sector);
-                        dst = *(u128 *)(linearSector);
-                    }
+                    if constexpr (BlockLinearToPitch)
+                        std::memcpy(linearSector, sector, SectorWidth);
+                    else
+                        std::memcpy(sector, linearSector, SectorWidth);
 
                     sector += SectorWidth; // `sectorWidth` bytes are of sequential image data
                 });
@@ -210,66 +205,64 @@ namespace skyline::gpu::texture {
      * @note The function assumes that the pitch texture is always equal or smaller than the blocklinear texture
      */
     template<bool BlockLinearToPitch>
-    void CopyBlockLinearSubrectInternal(const Dimensions &pitchDimensions, const Dimensions &blockLinearDimensions,
+    void CopyBlockLinearSubrectInternal(Dimensions pitchDimensions, Dimensions blockLinearDimensions,
                                  size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
                                  size_t gobBlockHeight, size_t gobBlockDepth,
                                  u8 *blockLinear, u8 *pitch,
                                  u16 originX, u16 originY) {
-        const u32 blockSize{(u32)(GobWidth * GobHeight * gobBlockHeight * gobBlockDepth)};
+        u32 blockSize{(u32)(GobWidth * GobHeight * gobBlockHeight * gobBlockDepth)};
 
         // Width parameters
-        const u32 robWidthUnalignedBytes{(u32)(util::DivideCeil<u32>(blockLinearDimensions.width, (u32)formatBlockWidth) * formatBpb)};
-        const u32 robWidthAlignedBytes{util::AlignUp(robWidthUnalignedBytes, GobWidth)};
-        const u32 robWidthBlocks{(u32)(robWidthUnalignedBytes / GobWidth)};
+        u32 robWidthUnalignedBytes{(u32)(util::DivideCeil<u32>(blockLinearDimensions.width, (u32)formatBlockWidth) * formatBpb)};
+        u32 robWidthAlignedBytes{util::AlignUp(robWidthUnalignedBytes, GobWidth)};
+        u32 robWidthBlocks{(u32)(robWidthUnalignedBytes / GobWidth)};
 
-        const u16 actualOriginX{util::DivideCeil<u16>(originX, (u16)formatBlockWidth)};
+        u16 actualOriginX{util::DivideCeil<u16>(originX, (u16)formatBlockWidth)};
 
-        const u32 actualSubSurfaceWidth{util::DivideCeil<u32>(pitchDimensions.width, (u32)formatBlockWidth)};
-        const u32 subRobWidthUnalignedBytes{actualSubSurfaceWidth * (u32)formatBpb};
-        const u32 originXBytes{actualOriginX * (u32)formatBpb};
-        const u32 subRobEndBytes{originXBytes + subRobWidthUnalignedBytes};
-        const u32 subRobWidthBlocks{(util::AlignDown(subRobEndBytes, GobWidth) - originXBytes) / (u32)GobWidth};
+        u32 actualSubSurfaceWidth{util::DivideCeil<u32>(pitchDimensions.width, (u32)formatBlockWidth)};
+        u32 subRobWidthUnalignedBytes{actualSubSurfaceWidth * (u32)formatBpb};
+        u32 originXBytes{actualOriginX * (u32)formatBpb};
+        u32 subRobEndBytes{originXBytes + subRobWidthUnalignedBytes};
+        u32 subRobWidthBlocks{(util::AlignDown(subRobEndBytes, GobWidth) - originXBytes) / (u32)GobWidth};
 
         // Height parameters
         u16 blockHeight{(u16)(gobBlockHeight)};
 
-        const u32 robHeight{blockHeight * (u32)GobHeight};
-        const u32 surfaceHeightLines{util::DivideCeil<u32>(blockLinearDimensions.height, (u32)formatBlockHeight)};
-        const u32 subSurfaceHeightLines{util::DivideCeil<u32>(pitchDimensions.height, (u32)formatBlockHeight)};
+        u32 robHeight{blockHeight * (u32)GobHeight};
+        u32 surfaceHeightLines{util::DivideCeil<u32>(blockLinearDimensions.height, (u32)formatBlockHeight)};
+        u32 subSurfaceHeightLines{util::DivideCeil<u32>(pitchDimensions.height, (u32)formatBlockHeight)};
 
-        const u16 actualOriginY{util::DivideCeil<u16>(originY, (u16)formatBlockWidth)};
+        u16 actualOriginY{util::DivideCeil<u16>(originY, (u16)formatBlockWidth)};
 
-        const u32 subSurfaceHeightRobs{actualOriginY ? util::AlignDown(subSurfaceHeightLines - (robHeight - (actualOriginY % robHeight)), robHeight) / robHeight : subSurfaceHeightLines / robHeight};
+        u32 subSurfaceHeightRobs{actualOriginY ? util::AlignDown(subSurfaceHeightLines - (robHeight - (actualOriginY % robHeight)), robHeight) / robHeight : subSurfaceHeightLines / robHeight};
 
         // SubROB block (X axis) alignment parameters
-        const bool startsSubRobXMisaligned{!util::IsAligned(actualOriginX, GobWidth)};
-        const bool endsSubRobXMisaligned{!util::IsAligned(actualOriginX + actualSubSurfaceWidth, GobWidth)};
+        bool startsSubRobXMisaligned{!util::IsAligned(actualOriginX, GobWidth)};
+        bool endsSubRobXMisaligned{!util::IsAligned(actualOriginX + actualSubSurfaceWidth, GobWidth)};
 
-        const u32 subRobStartPadding{startsSubRobXMisaligned ? originXBytes % (u32)GobWidth : 0};
-        const u32 subRobEndOffset{endsSubRobXMisaligned ? subRobEndBytes % (u32)GobWidth : 0};
+        u32 subRobStartPadding{startsSubRobXMisaligned ? originXBytes % (u32)GobWidth : 0};
+        u32 subRobEndOffset{endsSubRobXMisaligned ? subRobEndBytes % (u32)GobWidth : 0};
 
-        const u32 subRobStartBlockPadding{(originXBytes / (u32)GobWidth) * blockSize};
-        const u32 subRobEndBlockOffset{util::AlignDown(robWidthAlignedBytes - subRobEndBytes, GobWidth) * (u32)GobHeight * (u32)gobBlockHeight * (u32)gobBlockDepth};
+        u32 subRobStartBlockPadding{(originXBytes / (u32)GobWidth) * blockSize};
+        u32 subRobEndBlockOffset{util::AlignDown(robWidthAlignedBytes - subRobEndBytes, GobWidth) * (u32)GobHeight * (u32)gobBlockHeight * (u32)gobBlockDepth};
 
         // SubROB rob (Y axis) alignment parameters
-        const bool startsSubRectYMisaligned{!util::IsAligned(actualOriginY, robHeight)};
-        const bool endsSubRectYMisaligned{!util::IsAligned(actualOriginY + subSurfaceHeightLines, robHeight)};
+        bool startsSubRectYMisaligned{!util::IsAligned(actualOriginY, robHeight)};
+        bool endsSubRectYMisaligned{!util::IsAligned(actualOriginY + subSurfaceHeightLines, robHeight)};
 
-        const u16 startingRob{(u16)(actualOriginY / robHeight)};
+        u16 startingRob{(u16)(actualOriginY / robHeight)};
 
-        const u16 startingRobLinePadding{(u16)(startsSubRectYMisaligned ? actualOriginY % robHeight : 0)};
-        const u16 endingRobLineOffset{(u16)(endsSubRectYMisaligned ? (actualOriginY + subSurfaceHeightLines) % robHeight : 0)};
+        u16 startingRobLinePadding{(u16)(startsSubRectYMisaligned ? actualOriginY % robHeight : 0)};
+        u16 endingRobLineOffset{(u16)(endsSubRectYMisaligned ? (actualOriginY + subSurfaceHeightLines) % robHeight : 0)};
 
         // Depth parameters
-        const u16 blockDepth{std::min<u16>((u16)blockLinearDimensions.depth, (u16)gobBlockDepth)};
-        const u32 blockPaddingZ{(u32)(GobWidth * GobHeight * blockHeight * (gobBlockDepth - blockDepth))};
+        u16 blockDepth{std::min<u16>((u16)blockLinearDimensions.depth, (u16)gobBlockDepth)};
+        u32 blockPaddingZ{(u32)(GobWidth * GobHeight * blockHeight * (gobBlockDepth - blockDepth))};
 
-        // Pitch surface offsets
-        const u32 pitchWidthBytes{util::DivideCeil<u32>(pitchAmount, (u32)formatBlockWidth)};
-
-        const u32 robBytes{pitchWidthBytes * robHeight};
-        const u32 gobYOffset{pitchWidthBytes * (u32)GobHeight};
-        const u32 gobZOffset{pitchWidthBytes * subSurfaceHeightLines};
+        u32 pitchWidthBytes{pitchAmount ? pitchAmount : robWidthUnalignedBytes};
+        u32 robBytes{pitchWidthBytes * robHeight};
+        u32 gobYOffset{pitchWidthBytes * (u32)GobHeight};
+        u32 gobZOffset{pitchWidthBytes * subSurfaceHeightLines};
 
         // Offset the blocklinear texture by skipping ROBs that are not needed
         u8 *sector{blockLinear + (startingRob * robWidthAlignedBytes * robHeight * gobBlockDepth)};
@@ -291,13 +284,10 @@ namespace skyline::gpu::texture {
                             size_t yT{((index >> 1) & 0b110) | (index & 0b1)}; // Morton-Swizzle on the Y-axis
 
                             if constexpr (!isFirstOrLastRob) {
-                                if constexpr (BlockLinearToPitch) {
-                                    u128 &dst = *(u128 *)(pitchGob + (yT * pitchWidthBytes) + xT);
-                                    dst = *(u128 *)(sector);
-                                } else {
-                                    u128 &dst = *(u128 *)(sector);
-                                    dst = *(u128 *)(pitchGob + (yT * pitchWidthBytes) + xT);
-                                }
+                                if constexpr (BlockLinearToPitch)
+                                    std::memcpy(pitchGob + (yT * pitchWidthBytes) + xT, sector, SectorWidth);
+                                else
+                                    std::memcpy(sector, pitchGob + (yT * pitchWidthBytes) + xT, SectorWidth);
 
                                 sector += SectorWidth; // `SectorWidth` bytes are of sequential image data
                             } else {
@@ -387,12 +377,12 @@ namespace skyline::gpu::texture {
         u8 *pitchRob{pitch};
 
         if (startsSubRectYMisaligned) [[unlikely]] {
-            const u32 blockStartYPadding{(u32)(util::AlignDown(startingRobLinePadding, GobHeight) * GobWidth)};
+            u32 blockStartYPadding{(u32)(util::AlignDown(startingRobLinePadding, GobHeight) * GobWidth)};
 
             gobStartY = startingRobLinePadding / GobHeight;
 
             if (endsSubRectYMisaligned && ((startingRobLinePadding + subSurfaceHeightLines) < (robHeight - 1))) [[unlikely]] { // If we only have 1 subRob that starts and ends misaligned
-                const u16 endingGobLineOffset{(u16)(endingRobLineOffset % GobHeight)};
+                u16 endingGobLineOffset{(u16)(endingRobLineOffset % GobHeight)};
                 blockHeight = util::DivideCeil<u16>(endingRobLineOffset, GobHeight);
 
                 deswizzleSubRob(pitchRob,
@@ -417,13 +407,13 @@ namespace skyline::gpu::texture {
             }
         }
 
-        for (u16 rob{}; rob < subSurfaceHeightRobs; ++rob) {
+        for (u32 rob{}; rob < subSurfaceHeightRobs; ++rob) {
             deswizzleSubRob(pitchRob, std::false_type{});
             pitchRob += robBytes; // Increment the pitch ROB to the next subROB
         }
 
         if (endsSubRectYMisaligned) {
-            const u16 endingGobLineOffset{(u16)(endingRobLineOffset % GobHeight)};
+            u16 endingGobLineOffset{(u16)(endingRobLineOffset % GobHeight)};
             blockHeight = util::DivideCeil<u16>(endingRobLineOffset, GobHeight);
 
             deswizzleSubRob(pitchRob,
@@ -439,7 +429,7 @@ namespace skyline::gpu::texture {
     void CopyBlockLinearToLinear(Dimensions dimensions, size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, size_t gobBlockHeight, size_t gobBlockDepth, u8 *blockLinear, u8 *linear) {
         CopyBlockLinearInternal<true>(
             dimensions,
-            formatBlockWidth, formatBlockHeight, formatBpb, (u32)(dimensions.width * formatBpb),
+            formatBlockWidth, formatBlockHeight, formatBpb, 0,
             gobBlockHeight, gobBlockDepth,
             blockLinear, linear
         );
@@ -472,7 +462,7 @@ namespace skyline::gpu::texture {
     void CopyBlockLinearToLinear(const GuestTexture &guest, u8 *blockLinear, u8 *linear) {
         CopyBlockLinearInternal<true>(
             guest.dimensions,
-            guest.format->blockWidth, guest.format->blockHeight, guest.format->bpb, guest.dimensions.width * guest.format->bpb,
+            guest.format->blockWidth, guest.format->blockHeight, guest.format->bpb, 0,
             guest.tileConfig.blockHeight, guest.tileConfig.blockDepth,
             blockLinear, linear
         );
@@ -482,7 +472,7 @@ namespace skyline::gpu::texture {
                                  size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb,
                                  size_t gobBlockHeight, size_t gobBlockDepth,
                                  u8 *linear, u8 *blockLinear) {
-        CopyBlockLinearInternal<false>(dimensions,formatBlockWidth, formatBlockHeight, formatBpb, (u32)(dimensions.width * formatBpb), gobBlockHeight, gobBlockDepth, blockLinear, linear);
+        CopyBlockLinearInternal<false>(dimensions,formatBlockWidth, formatBlockHeight, formatBpb, 0, gobBlockHeight, gobBlockDepth, blockLinear, linear);
     }
 
     void CopyPitchToBlockLinear(Dimensions dimensions, size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount, size_t gobBlockHeight, size_t gobBlockDepth, u8 *pitch, u8 *blockLinear) {
@@ -510,7 +500,7 @@ namespace skyline::gpu::texture {
     void CopyLinearToBlockLinear(const GuestTexture &guest, u8 *linear, u8 *blockLinear) {
         CopyBlockLinearInternal<false>(
             guest.dimensions,
-            guest.format->blockWidth, guest.format->blockHeight, guest.format->bpb, guest.dimensions.width * guest.format->bpb,
+            guest.format->blockWidth, guest.format->blockHeight, guest.format->bpb, 0,
             guest.tileConfig.blockHeight, guest.tileConfig.blockDepth,
             blockLinear, linear
         );

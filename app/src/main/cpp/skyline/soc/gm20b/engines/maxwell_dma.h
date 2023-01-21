@@ -29,6 +29,7 @@ namespace skyline::soc::gm20b::engine {
         void DmaCopy();
 
         void CopyBlockLinearToPitch();
+
         void CopyPitchToBlockLinear();
 
         void LaunchDma();
@@ -201,15 +202,15 @@ namespace skyline::soc::gm20b::engine {
                 u8 numDstComponentsMinusOne : 2;
                 u8 _pad6_ : 6;
 
-                inline const u8 ComponentSize() const {
+                u8 ComponentSize() {
                     return componentSizeMinusOne + 1;
                 }
 
-                inline const u8 NumSrcComponents() const {
+                u8 NumSrcComponents() {
                     return numSrcComponentsMinusOne + 1;
                 }
 
-                inline const u8 NumDstComponents() const {
+                u8 NumDstComponents() {
                     return numDstComponentsMinusOne + 1;
                 }
             };
