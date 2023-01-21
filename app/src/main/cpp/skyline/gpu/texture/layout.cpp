@@ -223,7 +223,7 @@ namespace skyline::gpu::texture {
         u32 subRobWidthUnalignedBytes{actualSubSurfaceWidth * (u32)formatBpb};
         u32 originXBytes{actualOriginX * (u32)formatBpb};
         u32 subRobEndBytes{originXBytes + subRobWidthUnalignedBytes};
-        u32 subRobWidthBlocks{(util::AlignDown(subRobEndBytes, GobWidth) - originXBytes) / (u32)GobWidth};
+        u32 subRobWidthBlocks{(util::AlignDown(subRobEndBytes, GobWidth) - util::AlignDown(originXBytes, GobWidth)) / (u32)GobWidth};
 
         // Height parameters
         u16 blockHeight{(u16)(gobBlockHeight)};
@@ -234,7 +234,7 @@ namespace skyline::gpu::texture {
 
         u16 actualOriginY{util::DivideCeil<u16>(originY, (u16)formatBlockWidth)};
 
-        u32 subSurfaceHeightRobs{actualOriginY ? util::AlignDown(subSurfaceHeightLines - (robHeight - (actualOriginY % robHeight)), robHeight) / robHeight : subSurfaceHeightLines / robHeight};
+        u32 subSurfaceHeightRobs{actualOriginY ? (util::AlignDown(actualOriginY + subSurfaceHeightLines, robHeight) - util::AlignDown(actualOriginY, robHeight)) / robHeight : subSurfaceHeightLines / robHeight};
 
         // SubROB block (X axis) alignment parameters
         bool startsSubRobXMisaligned{!util::IsAligned(actualOriginX, GobWidth)};
