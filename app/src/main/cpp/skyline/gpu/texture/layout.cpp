@@ -259,7 +259,7 @@ namespace skyline::gpu::texture {
         u16 blockDepth{std::min<u16>((u16)blockLinearDimensions.depth, (u16)gobBlockDepth)};
         u32 blockPaddingZ{(u32)(GobWidth * GobHeight * blockHeight * (gobBlockDepth - blockDepth))};
 
-        u32 pitchWidthBytes{pitchAmount ? pitchAmount : robWidthUnalignedBytes};
+        u32 pitchWidthBytes{pitchAmount ? pitchAmount : subRobWidthUnalignedBytes};
         u32 robBytes{pitchWidthBytes * robHeight};
         u32 gobYOffset{pitchWidthBytes * (u32)GobHeight};
         u32 gobZOffset{pitchWidthBytes * subSurfaceHeightLines};
