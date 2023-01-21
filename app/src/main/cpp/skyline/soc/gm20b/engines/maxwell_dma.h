@@ -226,15 +226,15 @@ namespace skyline::soc::gm20b::engine {
                     u8 gobHeight : 4;
                     u16 _pad_;
 
-                    inline const u8 Width() const {
+                   u8 Width() {
                         return static_cast<u8>(1 << widthLog2);
                     }
 
-                    inline const u8 Height() const {
+                    u8 Height() {
                         return static_cast<u8>(1 << heightLog2);
                     }
 
-                    inline const u8 Depth() const {
+                    u8 Depth() {
                         return static_cast<u8>(1 << depthLog2);
                     }
                 } blockSize;

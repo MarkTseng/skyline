@@ -51,7 +51,7 @@ namespace skyline::soc::gm20b::engine {
                     } else {
                         u32 srcCopyOffset{0};
                         u32 dstCopyOffset{0};
-                        for (u32 linesToCopy = *registers.lineCount; linesToCopy; --linesToCopy, srcCopyOffset += *registers.pitchIn, dstCopyOffset += *registers.pitchOut)
+                        for (u32 linesToCopy{*registers.lineCount}; linesToCopy; --linesToCopy, srcCopyOffset += *registers.pitchIn, dstCopyOffset += *registers.pitchOut)
                             interconnect.Copy(u64{*registers.offsetOut + dstCopyOffset} , u64{*registers.offsetIn + srcCopyOffset}, u64{*registers.lineLengthIn});
                     }
                 } else {
@@ -66,6 +66,9 @@ namespace skyline::soc::gm20b::engine {
             }
         } else {
             // 1D copy
+            // TODO: implement swizzled 1D copies based on VMM 'kind'
+            Logger::Debug("src: 0x{:X} dst: 0x{:X} size: 0x{:X}", u64{*registers.offsetIn}, u64{*registers.offsetOut}, *registers.lineLengthIn);
+
             interconnect.Copy(u64{*registers.offsetOut}, u64{*registers.offsetIn}, u64{*registers.lineLengthIn});
         }
     }
@@ -84,10 +87,10 @@ namespace skyline::soc::gm20b::engine {
         auto srcMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetIn, srcLayerStride)};
 
         gpu::texture::Dimensions dstDimensions{*registers.lineLengthIn, *registers.lineCount, registers.srcSurface->depth};
-        u32 dstStride{*registers.pitchIn * dstDimensions.height * dstDimensions.depth};
+        u32 dstSize{*registers.pitchOut * dstDimensions.height * dstDimensions.depth}; // If remapping is not enabled there are only 1 bytes per pixel
 
         // Get destination address
-        auto dstMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetOut, dstStride)};
+        auto dstMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetOut, dstSize)};
 
         if (srcMappings.size() != 1 || dstMappings.size() != 1) [[unlikely]] {
             Logger::Warn("DMA copies for split textures are unimplemented!");
@@ -99,16 +102,16 @@ namespace skyline::soc::gm20b::engine {
         if ((srcDimensions.width != dstDimensions.width) || (srcDimensions.height != dstDimensions.height)) {
             gpu::texture::CopyBlockLinearToPitchSubrect(
                     srcDimensions, dstDimensions,
-                    1, 1, 1, *registers.pitchIn,
-                    registers.dstSurface->blockSize.Height(), registers.dstSurface->blockSize.Depth(),
+                    1, 1, 1, *registers.pitchOut,
+                    registers.srcSurface->blockSize.Height(), registers.srcSurface->blockSize.Depth(),
                     srcMappings.front().data(), dstMappings.front().data(),
-                    registers.dstSurface->origin.x, registers.dstSurface->origin.y
+                    registers.srcSurface->origin.x, registers.srcSurface->origin.y
             );
         } else {
             gpu::texture::CopyBlockLinearToPitch(
                     dstDimensions,
-                    1, 1, 1, *registers.pitchIn,
-                    registers.dstSurface->blockSize.Height(), registers.dstSurface->blockSize.Depth(),
+                    1, 1, 1, *registers.pitchOut,
+                    registers.srcSurface->blockSize.Height(), registers.srcSurface->blockSize.Depth(),
                     srcMappings.front().data(), dstMappings.front().data()
             );
         }
@@ -121,7 +124,7 @@ namespace skyline::soc::gm20b::engine {
         }
 
         gpu::texture::Dimensions srcDimensions{*registers.lineLengthIn, *registers.lineCount, registers.dstSurface->depth};
-        u32 srcSize{*registers.pitchIn * srcDimensions.height * srcDimensions.depth};
+        u32 srcSize{*registers.pitchIn * srcDimensions.height * srcDimensions.depth}; // If remapping is not enabled there are only 1 bytes per pixel
 
         // Get source address
         auto srcMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetIn, srcSize)};
