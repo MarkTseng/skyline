@@ -223,7 +223,7 @@ namespace skyline::gpu::texture {
         u32 subRobWidthUnalignedBytes{actualSubSurfaceWidth * (u32)formatBpb};
         u32 originXBytes{actualOriginX * (u32)formatBpb};
         u32 subRobEndBytes{originXBytes + subRobWidthUnalignedBytes};
-        u32 subRobWidthBlocks{(util::AlignDown(subRobEndBytes, GobWidth) - util::AlignDown(originXBytes, GobWidth)) / (u32)GobWidth};
+        u32 subRobWidthBlocks{(subRobEndBytes - util::AlignUp(originXBytes, GobWidth)) / (u32)GobWidth}; // Does not work if the SubROB starts and ends in a single block, but in that case an use case for this is never reached
 
         // Height parameters
         u16 blockHeight{(u16)(gobBlockHeight)};
@@ -234,7 +234,7 @@ namespace skyline::gpu::texture {
 
         u16 actualOriginY{util::DivideCeil<u16>(originY, (u16)formatBlockWidth)};
 
-        u32 subSurfaceHeightRobs{actualOriginY ? (util::AlignDown(actualOriginY + subSurfaceHeightLines, robHeight) - util::AlignDown(actualOriginY, robHeight)) / robHeight : subSurfaceHeightLines / robHeight};
+        u32 subSurfaceHeightRobs{actualOriginY ? ((actualOriginY + subSurfaceHeightLines) - util::AlignUp(actualOriginY, robHeight)) / robHeight : subSurfaceHeightLines / robHeight}; // Same as with subRobWidthBlocks but with ROBs instead of blocks
 
         // SubROB block (X axis) alignment parameters
         bool startsSubRobXMisaligned{!util::IsAligned(actualOriginX, GobWidth)};
@@ -244,7 +244,7 @@ namespace skyline::gpu::texture {
         u32 subRobEndOffset{endsSubRobXMisaligned ? subRobEndBytes % (u32)GobWidth : 0};
 
         u32 subRobStartBlockPadding{(originXBytes / (u32)GobWidth) * blockSize};
-        u32 subRobEndBlockOffset{util::AlignDown(robWidthAlignedBytes - subRobEndBytes, GobWidth) * (u32)GobHeight * (u32)gobBlockHeight * (u32)gobBlockDepth};
+        u32 subRobEndBlockOffset{(robWidthAlignedBytes - util::AlignUp(subRobEndBytes, GobWidth)) * (u32)GobHeight * (u32)gobBlockHeight * (u32)gobBlockDepth};
 
         // SubROB rob (Y axis) alignment parameters
         bool startsSubRectYMisaligned{!util::IsAligned(actualOriginY, robHeight)};
@@ -303,10 +303,11 @@ namespace skyline::gpu::texture {
                                     continue;
                                 }
 
-                                u8 * const linearSector{pitchGob + (yT * pitchWidthBytes) + xT};
+                                u8 *linearSector{pitchGob + (yT * pitchWidthBytes) + xT};
+                                u16 txT{(u16)xT};
                                 #pragma clang loop unroll_count(4)
                                 for (u16 pixelOffset{}; pixelOffset < SectorWidth; pixelOffset += formatBpb) {
-                                    if (copySector(xT)) {
+                                    if (copySector(txT)) {
                                         if constexpr (BlockLinearToPitch)
                                             std::memcpy(linearSector + pixelOffset, sector, formatBpb);
                                         else
@@ -314,7 +315,7 @@ namespace skyline::gpu::texture {
                                     }
 
                                     sector += formatBpb;
-                                    xT += formatBpb;
+                                    txT += formatBpb;
                                 }
                             }
                         }
@@ -335,7 +336,7 @@ namespace skyline::gpu::texture {
             sector += subRobStartBlockPadding;
 
             if (startsSubRobXMisaligned) [[unlikely]] {
-                if (endsSubRobXMisaligned && ((subRobStartPadding + actualSubSurfaceWidth) < 63)) [[unlikely]] { // If we only have one block that starts and ends misaligned
+                if (endsSubRobXMisaligned && ((subRobStartPadding + actualSubSurfaceWidth) < GobWidth)) [[unlikely]] { // If we only have one block that starts and ends misaligned
                     deswizzleBlock(pitchRob, [&](size_t xT) __attribute__((always_inline)) {
                         if ((subRobStartPadding <= xT) && (xT < subRobEndOffset))
                             return true;
@@ -381,7 +382,7 @@ namespace skyline::gpu::texture {
 
             gobStartY = startingRobLinePadding / GobHeight;
 
-            if (endsSubRectYMisaligned && ((startingRobLinePadding + subSurfaceHeightLines) < (robHeight - 1))) [[unlikely]] { // If we only have 1 subRob that starts and ends misaligned
+            if (endsSubRectYMisaligned && ((startingRobLinePadding + subSurfaceHeightLines) < robHeight)) [[unlikely]] { // If we only have 1 subRob that starts and ends misaligned
                 u16 endingGobLineOffset{(u16)(endingRobLineOffset % GobHeight)};
                 blockHeight = util::DivideCeil<u16>(endingRobLineOffset, GobHeight);
 
