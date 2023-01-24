@@ -342,7 +342,6 @@ namespace skyline::gpu::texture {
                             return true;
                         return false;
                     });
-                    pitchRob += GobWidth; // Increment the pitch block to the next block (As Block Width = 1 GOB Width)
                     return;
                 }
 
@@ -352,7 +351,7 @@ namespace skyline::gpu::texture {
                     return false;
                 });
 
-                pitchRob += GobWidth; // Increment the pitch block to the next block (As Block Width = 1 GOB Width)
+                pitchRob += (GobWidth - subRobStartPadding); // Increment the pitch block to the next block (excludes padding)
             }
 
             for (u32 block{}; block < subRobWidthBlocks; ++block) {
@@ -368,7 +367,6 @@ namespace skyline::gpu::texture {
                     return false;
                 });
 
-                pitchRob += GobWidth; // Increment the pitch block to the next block (As Block Width = 1 GOB Width)
             }
 
             // Skip to the end of the ROB
