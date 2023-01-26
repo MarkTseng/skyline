@@ -488,6 +488,20 @@ namespace skyline::gpu::texture {
         );
     }
 
+    void CopyLinearToBlockLinearSubrect(Dimensions linearDimensions, Dimensions blockLinearDimensions,
+                                       size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb,
+                                       size_t gobBlockHeight, size_t gobBlockDepth,
+                                       u8 *linear, u8 *blockLinear,
+                                       u16 originX, u16 originY) {
+        CopyBlockLinearSubrectInternal<false>(linearDimensions, blockLinearDimensions,
+                                              formatBlockWidth, formatBlockHeight,
+                                              formatBpb, 0,
+                                              gobBlockHeight, gobBlockDepth,
+                                              blockLinear, linear,
+                                              originX, originY
+        );
+    }
+
     void CopyPitchToBlockLinearSubrect(Dimensions pitchDimensions, Dimensions blockLinearDimensions,
                                        size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
                                        size_t gobBlockHeight, size_t gobBlockDepth,

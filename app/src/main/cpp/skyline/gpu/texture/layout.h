@@ -79,6 +79,15 @@ namespace skyline::gpu::texture {
                                 u8 *pitch, u8 *blockLinear);
 
     /**
+     * @brief Copies the contents of a linear texture to a part of a blocklinear texture
+     */
+    void CopyLinearToBlockLinearSubrect(Dimensions linearDimensions, Dimensions blockLinearDimensions,
+                                       size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb,
+                                       size_t gobBlockHeight, size_t gobBlockDepth,
+                                       u8 *linear, u8 *blockLinear,
+                                       u16 originX, u16 originY);
+
+    /**
      * @brief Copies the contents of a pitch texture to a part of a blocklinear texture
      */
     void CopyPitchToBlockLinearSubrect(Dimensions pitchDimensions, Dimensions blockLinearDimensions,
