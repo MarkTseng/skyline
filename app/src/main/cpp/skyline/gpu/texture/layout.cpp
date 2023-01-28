@@ -366,7 +366,6 @@ namespace skyline::gpu::texture {
                         return true;
                     return false;
                 });
-
             }
 
             // Skip to the end of the ROB
