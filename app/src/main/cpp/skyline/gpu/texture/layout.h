@@ -55,7 +55,7 @@ namespace skyline::gpu::texture {
                                        size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
                                        size_t gobBlockHeight, size_t gobBlockDepth,
                                        u8 *blockLinear, u8 *pitch,
-                                       u16 originX, u16 originY);
+                                       u32 originX, u32 originY);
 
     /**
      * @brief Copies the contents of a blocklinear guest texture to a linear output buffer
@@ -85,7 +85,7 @@ namespace skyline::gpu::texture {
                                        size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb,
                                        size_t gobBlockHeight, size_t gobBlockDepth,
                                        u8 *linear, u8 *blockLinear,
-                                       u16 originX, u16 originY);
+                                        u32 originX, u32 originY);
 
     /**
      * @brief Copies the contents of a pitch texture to a part of a blocklinear texture
@@ -94,7 +94,7 @@ namespace skyline::gpu::texture {
                                  size_t formatBlockWidth, size_t formatBlockHeight, size_t formatBpb, u32 pitchAmount,
                                  size_t gobBlockHeight, size_t gobBlockDepth,
                                  u8 *pitch, u8 *blockLinear,
-                                 u16 originX, u16 originY);
+                                 u32 originX, u32 originY);
 
     /**
      * @brief Copies the contents of a linear guest texture to a blocklinear texture

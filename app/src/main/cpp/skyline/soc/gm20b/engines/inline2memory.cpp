@@ -45,7 +45,7 @@ namespace skyline::soc::gm20b::engine {
                                                                  1, 1, 1,
                                                                  1 << static_cast<u8>(state.dstBlockSize.height), 1 << static_cast<u8>(state.dstBlockSize.depth),
                                                                  span{buffer}.cast<u8>().data(), dst,
-                                                                 static_cast<u16>(state.originBytesX), static_cast<u16>(state.originSamplesY)
+                                                                 state.originBytesX, state.originSamplesY
                     );
                 else
                     gpu::texture::CopyLinearToBlockLinear(dstDimensions,
