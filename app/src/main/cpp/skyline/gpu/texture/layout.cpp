@@ -159,7 +159,7 @@ namespace skyline::gpu::texture {
                    size_t xBytes{(pixel % xPerGOB) * formatBpb};
 
                    // Set offset on X
-                   size_t GobXOffset{((xBytes >= 32) ? 256U : 0U) + (xBytes & 0xF) + (((xBytes % 32) >= 16) ? 32U : 0U)};
+                   size_t GobXOffset{(((xBytes & 0x3F) >> 5) << 8) + (xBytes & 0xF) + (((xBytes & 0x1F) >> 4) << 5)};
 
                    if constexpr (BlockLinearToPitch)
                        std::memcpy(deSwizzledOffset, swizzledOffset + GobXOffset, formatBpb);
@@ -228,7 +228,7 @@ namespace skyline::gpu::texture {
                         size_t xBytes{((actualOriginX + pixel) % xPerGOB) * formatBpb};
 
                         // Set offset on X
-                        u64 GobXOffset{((xBytes >= 32) ? 256U : 0U) + (xBytes & 0xF) + (((xBytes % 32) >= 16) ? 32U : 0U)};
+                        size_t GobXOffset{(((xBytes & 0x3F) >> 5) << 8) + (xBytes & 0xF) + (((xBytes & 0x1F) >> 4) << 5)};
 
                         if constexpr (BlockLinearToPitch)
                             std::memcpy(deSwizzledOffset, swizzledOffset + GobXOffset, formatBpb);
