@@ -99,9 +99,10 @@ namespace skyline::soc::gm20b::engine {
 
         Logger::Debug("{}x{}@0x{:X} -> {}x{}@0x{:X}", srcDimensions.width, srcDimensions.height, srcLayerAddress, dstDimensions.width, dstDimensions.height, u64{*registers.offsetOut});
 
-        if ((srcDimensions.width != dstDimensions.width) || (srcDimensions.height != dstDimensions.height)) {
+        if ((util::AlignDown(srcDimensions.width, 64) != util::AlignDown(dstDimensions.width, 64))
+        || registers.srcSurface->origin.x || registers.srcSurface->origin.y) {
             gpu::texture::CopyBlockLinearToPitchSubrect(
-                    srcDimensions, dstDimensions,
+                dstDimensions, srcDimensions,
                     1, 1, 1, *registers.pitchOut,
                     registers.srcSurface->blockSize.Height(), registers.srcSurface->blockSize.Depth(),
                     srcMappings.front().data(), dstMappings.front().data(),
@@ -143,7 +144,8 @@ namespace skyline::soc::gm20b::engine {
 
         Logger::Debug("{}x{}@0x{:X} -> {}x{}@0x{:X}", srcDimensions.width, srcDimensions.height, u64{*registers.offsetIn}, dstDimensions.width, dstDimensions.height, dstLayerAddress);
 
-        if ((srcDimensions.width != dstDimensions.width) || (srcDimensions.height != dstDimensions.height)) {
+        if ((util::AlignDown(srcDimensions.width, 64) != util::AlignDown(dstDimensions.width, 64))
+        || registers.dstSurface->origin.x || registers.dstSurface->origin.y) {
             gpu::texture::CopyPitchToBlockLinearSubrect(
                     srcDimensions, dstDimensions,
                     1, 1, 1, *registers.pitchIn,
@@ -153,7 +155,7 @@ namespace skyline::soc::gm20b::engine {
             );
         } else {
             gpu::texture::CopyPitchToBlockLinear(
-                    dstDimensions,
+                    srcDimensions,
                     1, 1, 1, *registers.pitchIn,
                     registers.dstSurface->blockSize.Height(), registers.dstSurface->blockSize.Depth(),
                     srcMappings.front().data(), dstMappings.front().data()

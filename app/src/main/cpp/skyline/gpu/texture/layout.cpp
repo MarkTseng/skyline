@@ -206,8 +206,8 @@ namespace skyline::gpu::texture {
         size_t blockLinearTextureWidthAlignedBytes{util::AlignUp(util::DivideCeil<size_t>(blockLinearDimensions.width, formatBlockWidth) * formatBpb, GobWidth)};
 
         size_t xPerGOB{GobWidth / formatBpb};
-        size_t actualOriginX{util::DivideCeil<size_t>(originX, formatBlockWidth)};
-        size_t originXBytes{actualOriginX * formatBpb};
+        size_t originXOffset{util::DivideCeil<size_t>(originX, formatBlockWidth)};
+        size_t originXBytes{originXOffset * formatBpb};
 
         size_t xPerFirstGOB{(GobWidth - (originXBytes & (GobWidth - 1))) / formatBpb};
         size_t xPerLastGOB{((originXBytes + pitchTextureWidthBytes) & (GobWidth - 1)) / formatBpb};
@@ -236,7 +236,7 @@ namespace skyline::gpu::texture {
                 // Y Offset in entire GOBs
                 u64 GobYOffset{blockHeight * GobWidth * GobHeight};
                 // Y Offset inside 1 GOB
-                GobYOffset += (((line & 0x07) >> 1) << 6) + ((line & 0x01) << 4);
+                GobYOffset += ((((originYOffset + line) & 0x07) >> 1) << 6) + (((originYOffset + line) & 0x01) << 4);
 
                 u8 *deSwizzledOffset{pitchOffset};
                 u8 *swizzledOffset{blockLinear + robOffset + GobYOffset + startingBlockOffset};
@@ -244,7 +244,7 @@ namespace skyline::gpu::texture {
                 // Copy per every element, don't use for copies larger than GobWidth
                 auto elemCopy{[&](size_t from, size_t to) {
                     for (size_t pixel{from}; pixel < to; ++pixel, deSwizzledOffset += formatBpb) {
-                        size_t xBytes{(actualOriginX + pixel) * formatBpb};
+                        size_t xBytes{(originXOffset + pixel) * formatBpb};
 
                         // Set offset on X
                         size_t GobXOffset{(((xBytes & 0x3F) >> 5) << 8) + (xBytes & 0xF) + (((xBytes & 0x1F) >> 4) << 5)};
