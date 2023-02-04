@@ -49,9 +49,7 @@ namespace skyline::soc::gm20b::engine {
                         // Both Linear, copy as is.
                         interconnect.Copy(u64{*registers.offsetOut}, u64{*registers.offsetIn}, u64{*registers.lineLengthIn * *registers.lineCount});
                     } else {
-                        u32 srcCopyOffset{0};
-                        u32 dstCopyOffset{0};
-                        for (u32 linesToCopy{*registers.lineCount}; linesToCopy; --linesToCopy, srcCopyOffset += *registers.pitchIn, dstCopyOffset += *registers.pitchOut)
+                        for (u32 linesToCopy{*registers.lineCount}, srcCopyOffset{}, dstCopyOffset{}; linesToCopy; --linesToCopy, srcCopyOffset += *registers.pitchIn, dstCopyOffset += *registers.pitchOut)
                             interconnect.Copy(u64{*registers.offsetOut + dstCopyOffset} , u64{*registers.offsetIn + srcCopyOffset}, u64{*registers.lineLengthIn});
                     }
                 } else {
