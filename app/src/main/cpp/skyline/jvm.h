@@ -30,13 +30,18 @@ namespace skyline {
         jobject settingsInstance; //!< The settings instance
 
       public:
-        KtSettings(JNIEnv *env, jobject settingsInstance) : env(env), settingsInstance(settingsInstance), settingsClass(env->GetObjectClass(settingsInstance)) {}
+        KtSettings(JNIEnv *env, jobject settingsInstance) : env(env), settingsInstance(env->NewGlobalRef(settingsInstance)), settingsClass(reinterpret_cast<jclass>(env->NewGlobalRef(env->GetObjectClass(settingsInstance)))) {}
 
         KtSettings(const KtSettings &) = delete;
 
         void operator=(const KtSettings &) = delete;
 
         KtSettings(KtSettings &&) = default;
+
+        ~KtSettings() {
+            env->DeleteGlobalRef(settingsInstance);
+            env->DeleteGlobalRef(settingsClass);
+        }
 
         /**
          * @param key A null terminated string containing the key of the setting to get
