@@ -14,7 +14,8 @@ namespace skyline::soc::gm20b::engine {
     MaxwellDma::MaxwellDma(const DeviceState &state, ChannelContext &channelCtx)
         : channelCtx{channelCtx},
           syncpoints{state.soc->host1x.syncpoints},
-          interconnect{*state.gpu, channelCtx} {}
+          interconnect{*state.gpu, channelCtx},
+          copyCache(0) {}
 
     __attribute__((always_inline)) void MaxwellDma::CallMethod(u32 method, u32 argument) {
         Logger::Verbose("Called method in Maxwell DMA: 0x{:X} args: 0x{:X}", method, argument);
@@ -45,12 +46,26 @@ namespace skyline::soc::gm20b::engine {
             if (registers.launchDma->srcMemoryLayout == registers.launchDma->dstMemoryLayout) [[unlikely]] {
                 // Pitch to Pitch copy
                 if (registers.launchDma->srcMemoryLayout == Registers::LaunchDma::MemoryLayout::Pitch) {
-                    if ((*registers.pitchIn == *registers.pitchOut) && (*registers.pitchIn == *registers.lineLengthIn)) {
-                        // Both Linear, copy as is.
-                        interconnect.Copy(u64{*registers.offsetOut}, u64{*registers.offsetIn}, u64{*registers.lineLengthIn * *registers.lineCount});
+                    auto srcMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetIn, *registers.pitchIn * *registers.lineCount)};
+                    auto dstMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetOut, *registers.pitchOut * *registers.lineCount)};
+
+                    if (srcMappings.size() != 1 || dstMappings.size() != 1) [[unlikely]] {
+                        if (srcMappings.size() != 1 || dstMappings.size() != 1) [[unlikely]]
+                                HandleSplitCopy(srcMappings, dstMappings, *registers.lineLengthIn, *registers.lineLengthIn, [&](u8 *src, u8 *dst) {
+                                // Both Linear, copy as is.
+                                if ((*registers.pitchIn == *registers.pitchOut) && (*registers.pitchIn == *registers.lineLengthIn))
+                                    std::memcpy(dst, src, *registers.lineLengthIn * *registers.lineCount);
+                                else
+                                    for (u32 linesToCopy{*registers.lineCount}, srcCopyOffset{}, dstCopyOffset{}; linesToCopy; --linesToCopy, srcCopyOffset += *registers.pitchIn, dstCopyOffset += *registers.pitchOut)
+                                        std::memcpy(dst + dstCopyOffset, src + srcCopyOffset, *registers.lineLengthIn);
+                            });
                     } else {
-                        for (u32 linesToCopy{*registers.lineCount}, srcCopyOffset{}, dstCopyOffset{}; linesToCopy; --linesToCopy, srcCopyOffset += *registers.pitchIn, dstCopyOffset += *registers.pitchOut)
-                            interconnect.Copy(u64{*registers.offsetOut + dstCopyOffset} , u64{*registers.offsetIn + srcCopyOffset}, u64{*registers.lineLengthIn});
+                        // Both Linear, copy as is.
+                        if ((*registers.pitchIn == *registers.pitchOut) && (*registers.pitchIn == *registers.lineLengthIn))
+                            interconnect.Copy(dstMappings.front(), srcMappings.front());
+                        else
+                            for (u32 linesToCopy{*registers.lineCount}, srcCopyOffset{}, dstCopyOffset{}; linesToCopy; --linesToCopy, srcCopyOffset += *registers.pitchIn, dstCopyOffset += *registers.pitchOut)
+                                interconnect.Copy(dstMappings.front().subspan(dstCopyOffset, u64{*registers.lineLengthIn}), srcMappings.front().subspan(srcCopyOffset, u64{*registers.lineLengthIn}));
                     }
                 } else {
                     Logger::Warn("BlockLinear to BlockLinear DMA copies are unimplemented!");
@@ -67,8 +82,55 @@ namespace skyline::soc::gm20b::engine {
             // TODO: implement swizzled 1D copies based on VMM 'kind'
             Logger::Debug("src: 0x{:X} dst: 0x{:X} size: 0x{:X}", u64{*registers.offsetIn}, u64{*registers.offsetOut}, *registers.lineLengthIn);
 
-            interconnect.Copy(u64{*registers.offsetOut}, u64{*registers.offsetIn}, u64{*registers.lineLengthIn});
+            auto srcMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetIn, *registers.lineLengthIn)};
+            auto dstMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetOut, *registers.lineLengthIn)};
+
+            if (srcMappings.size() != 1 || dstMappings.size() != 1) [[unlikely]]
+                HandleSplitCopy(srcMappings, dstMappings, *registers.lineLengthIn, *registers.lineLengthIn, [&](u8 *src, u8 *dst) {
+                    std::memcpy(dst, src, *registers.lineLengthIn);
+                });
+            else
+                interconnect.Copy(dstMappings.front(), srcMappings.front());
         }
+    }
+
+    void MaxwellDma::HandleSplitCopy(TranslatedAddressRange srcMappings, TranslatedAddressRange dstMappings, size_t srcSize, size_t dstSize, auto copyCallback) {
+        bool isSrcSplit{};
+        u8 *src{srcMappings.front().data()}, *dst{dstMappings.front().data()};
+        if (srcMappings.size() != 1) {
+            if (copyCache.size() < srcSize)
+                copyCache.resize(srcSize);
+
+            src = copyCache.data();
+            for (size_t currMapping{}, offset{}; currMapping < srcMappings.size(); offset += srcMappings[currMapping].size(), ++currMapping)
+                std::memcpy(src + offset, srcMappings[currMapping].data(), srcMappings[currMapping].size());
+
+            isSrcSplit = true;
+        }
+        if (dstMappings.size() != 1) {
+            // If both the source and destination are split
+            if (isSrcSplit) {
+                if (copyCache.size() < (srcSize + dstSize))
+                    copyCache.resize(srcSize + dstSize);
+
+                dst = copyCache.data() + srcSize;
+            } else {
+                if (copyCache.size() < dstSize)
+                    copyCache.resize(dstSize);
+
+                dst = copyCache.data();
+            }
+        }
+
+        copyCallback(src, dst);
+
+        if (dstMappings.size() != 1)
+            for (size_t currMapping{}, offset{}; currMapping < dstMappings.size(); offset += dstMappings[currMapping].size(), ++currMapping)
+                std::memcpy(dstMappings[currMapping].data(), dst + offset, dstMappings[currMapping].size());
+
+        // If the cache is over 5 MBs large then we clamp it to not waste memory
+        if (copyCache.size() > 5242880)
+            copyCache.resize(5242880);
     }
 
     void MaxwellDma::CopyBlockLinearToPitch() {
@@ -90,30 +152,32 @@ namespace skyline::soc::gm20b::engine {
         // Get destination address
         auto dstMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetOut, dstSize)};
 
-        if (srcMappings.size() != 1 || dstMappings.size() != 1) [[unlikely]] {
-            Logger::Warn("DMA copies for split textures are unimplemented!");
-            return;
-        }
-
-        Logger::Debug("{}x{}@0x{:X} -> {}x{}@0x{:X}", srcDimensions.width, srcDimensions.height, srcLayerAddress, dstDimensions.width, dstDimensions.height, u64{*registers.offsetOut});
-
-        if ((util::AlignDown(srcDimensions.width, 64) != util::AlignDown(dstDimensions.width, 64))
-        || registers.srcSurface->origin.x || registers.srcSurface->origin.y) {
-            gpu::texture::CopyBlockLinearToPitchSubrect(
-                dstDimensions, srcDimensions,
+        auto copyFunc{[&](u8 *src, u8 *dst) {
+            if ((util::AlignDown(srcDimensions.width, 64) != util::AlignDown(dstDimensions.width, 64))
+                || registers.srcSurface->origin.x || registers.srcSurface->origin.y) {
+                gpu::texture::CopyBlockLinearToPitchSubrect(
+                    dstDimensions, srcDimensions,
                     1, 1, 1, *registers.pitchOut,
                     registers.srcSurface->blockSize.Height(), registers.srcSurface->blockSize.Depth(),
-                    srcMappings.front().data(), dstMappings.front().data(),
+                    src, dst,
                     registers.srcSurface->origin.x, registers.srcSurface->origin.y
-            );
-        } else {
-            gpu::texture::CopyBlockLinearToPitch(
+                );
+            } else {
+                gpu::texture::CopyBlockLinearToPitch(
                     dstDimensions,
                     1, 1, 1, *registers.pitchOut,
                     registers.srcSurface->blockSize.Height(), registers.srcSurface->blockSize.Depth(),
-                    srcMappings.front().data(), dstMappings.front().data()
-            );
-        }
+                    src, dst
+                );
+            }
+        }};
+
+        Logger::Debug("{}x{}@0x{:X} -> {}x{}@0x{:X}", srcDimensions.width, srcDimensions.height, srcLayerAddress, dstDimensions.width, dstDimensions.height, u64{*registers.offsetOut});
+
+        if (srcMappings.size() != 1 || dstMappings.size() != 1)
+            HandleSplitCopy(srcMappings, dstMappings, srcLayerStride, dstSize, copyFunc);
+        else
+            copyFunc(srcMappings.front().data(), dstMappings.front().data());
     }
 
     void MaxwellDma::CopyPitchToBlockLinear() {
@@ -135,30 +199,32 @@ namespace skyline::soc::gm20b::engine {
         // Get destination address
         auto dstMappings{channelCtx.asCtx->gmmu.TranslateRange(*registers.offsetOut, dstLayerStride)};
 
-        if (srcMappings.size() != 1 || dstMappings.size() != 1) [[unlikely]] {
-            Logger::Warn("DMA copies for split textures are unimplemented!");
-            return;
-        }
-
         Logger::Debug("{}x{}@0x{:X} -> {}x{}@0x{:X}", srcDimensions.width, srcDimensions.height, u64{*registers.offsetIn}, dstDimensions.width, dstDimensions.height, dstLayerAddress);
 
-        if ((util::AlignDown(srcDimensions.width, 64) != util::AlignDown(dstDimensions.width, 64))
-        || registers.dstSurface->origin.x || registers.dstSurface->origin.y) {
-            gpu::texture::CopyPitchToBlockLinearSubrect(
+        auto copyFunc{[&](u8 *src, u8 *dst) {
+            if ((util::AlignDown(srcDimensions.width, 64) != util::AlignDown(dstDimensions.width, 64))
+                || registers.dstSurface->origin.x || registers.dstSurface->origin.y) {
+                gpu::texture::CopyPitchToBlockLinearSubrect(
                     srcDimensions, dstDimensions,
                     1, 1, 1, *registers.pitchIn,
                     registers.dstSurface->blockSize.Height(), registers.dstSurface->blockSize.Depth(),
                     srcMappings.front().data(), dstMappings.front().data(),
                     registers.dstSurface->origin.x, registers.dstSurface->origin.y
-            );
-        } else {
-            gpu::texture::CopyPitchToBlockLinear(
+                );
+            } else {
+                gpu::texture::CopyPitchToBlockLinear(
                     srcDimensions,
                     1, 1, 1, *registers.pitchIn,
                     registers.dstSurface->blockSize.Height(), registers.dstSurface->blockSize.Depth(),
                     srcMappings.front().data(), dstMappings.front().data()
-            );
-        }
+                );
+            }
+        }};
+
+        if (srcMappings.size() != 1 || dstMappings.size() != 1)
+            HandleSplitCopy(srcMappings, dstMappings, srcSize, dstLayerStride, copyFunc);
+        else
+            copyFunc(srcMappings.front().data(), dstMappings.front().data());
     }
 
     void MaxwellDma::ReleaseSemaphore() {
