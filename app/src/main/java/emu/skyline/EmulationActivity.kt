@@ -76,6 +76,8 @@ class EmulationActivity : AppCompatActivity(), SurfaceHolder.Callback, View.OnTo
     @Inject
     lateinit var preferenceSettings : PreferenceSettings
 
+    lateinit var nativeSettings : NativeSettings
+
     @Inject
     lateinit var inputManager : InputManager
 
@@ -194,7 +196,7 @@ class EmulationActivity : AppCompatActivity(), SurfaceHolder.Callback, View.OnTo
 
         GpuDriverHelper.ensureFileRedirectDir(this)
         emulationThread = Thread {
-            executeApplication(rom.toString(), romType, romFd.detachFd(), NativeSettings(this, preferenceSettings), applicationContext.getPublicFilesDir().canonicalPath + "/", applicationContext.filesDir.canonicalPath + "/", applicationInfo.nativeLibraryDir + "/", assets)
+            executeApplication(rom.toString(), romType, romFd.detachFd(), nativeSettings, applicationContext.getPublicFilesDir().canonicalPath + "/", applicationContext.filesDir.canonicalPath + "/", applicationInfo.nativeLibraryDir + "/", assets)
             returnFromEmulation()
         }
 
@@ -210,7 +212,10 @@ class EmulationActivity : AppCompatActivity(), SurfaceHolder.Callback, View.OnTo
         super.onCreate(savedInstanceState)
         requestedOrientation = preferenceSettings.orientation
         window.attributes.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+
         inputHandler = InputHandler(inputManager, preferenceSettings)
+        nativeSettings = NativeSettings(this, preferenceSettings)
+
         setContentView(binding.root)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -252,9 +257,13 @@ class EmulationActivity : AppCompatActivity(), SurfaceHolder.Callback, View.OnTo
                     }
                 }, 250)
                 setOnClickListener {
-                    preferenceSettings.disableFrameThrottling = !preferenceSettings.disableFrameThrottling
-                    var color = if (preferenceSettings.disableFrameThrottling) getColor(R.color.colorPerfStatsSecondary) else getColor(R.color.colorPerfStatsPrimary)
+                    val newValue = !preferenceSettings.disableFrameThrottling
+                    preferenceSettings.disableFrameThrottling = newValue
+                    nativeSettings.disableFrameThrottling = newValue
+
+                    var color = if (newValue) getColor(R.color.colorPerfStatsSecondary) else getColor(R.color.colorPerfStatsPrimary)
                     binding.perfStats.setTextColor(color)
+                    nativeSettings.updateNative()
                 }
             }
         }
